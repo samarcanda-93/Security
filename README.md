@@ -13,6 +13,8 @@ TODO: Explain TerminalSettings choice and RAII
 
 - C++23 compiler and standard library.
 - CMake 3.28 or newer
+- GTest
+- Libsodium
 
 ## Build and Run
 

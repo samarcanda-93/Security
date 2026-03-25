@@ -1,3 +1,5 @@
+#include <sodium.h>
+
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -10,6 +12,10 @@ int main(int argc, char* argv[]) {
     if (argc != 3) {
       throw std::invalid_argument("Was expecting 2 arguments, got: " +
                                   std::to_string(argc - 1));
+    }
+
+    if (sodium_init() < 0) {
+      throw std::runtime_error("Failed to initialize libsodium library");
     }
 
     std::vector<std::string> args(argv, argv + argc);
