@@ -3,10 +3,9 @@
 #include <string>
 #include <vector>
 
-#include "decrypt.hpp"
-#include "encrypt.hpp"
+#include "encrypt_decrypt.hpp"
 
-auto main(int argc, char* argv[]) -> int {
+int main(int argc, char* argv[]) {
   try {
     if (argc != 3) {
       throw std::invalid_argument("Was expecting 2 arguments, got: " +
@@ -18,9 +17,9 @@ auto main(int argc, char* argv[]) -> int {
     const std::string& file_name{args[2]};
 
     if (task == "encrypt") {
-      encrypt_file(file_name);
+      encrypt_file(file_name, get_password());
     } else if (task == "decrypt") {
-      decrypt_file(file_name);
+      decrypt_file(file_name, get_password());
     } else {
       throw std::invalid_argument("Don't know how to do this: " + task);
     }
