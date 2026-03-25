@@ -4,6 +4,7 @@
 #include <fstream>
 #include <string>
 
+#include "command.hpp"
 #include "encrypt_decrypt.hpp"
 
 // TODO: Check and update tests
@@ -28,11 +29,11 @@ TEST(PasswordRulesTest, RejectsPasswordWithDigitsOrSymbols) {
 }
 
 TEST(EncryptDecryptTest, EncryptFileDoesNotThrow) {
-  EXPECT_NO_THROW(encrypt_file("a_file.txt", "lowercase"));
+  EXPECT_NO_THROW(encrypt_file(Task("encrypt", "a_file.txt"), "lowercase"));
 }
 
 TEST(EncryptDecryptTest, DecryptFileDoesNotThrow) {
-  EXPECT_NO_THROW(decrypt_file("a_file.txt.enc", "lowercase"));
+  EXPECT_NO_THROW(decrypt_file(Task("decrypt", "a_file.txt.enc"), "lowercase"));
 }
 
 TEST(EncryptDecryptTest, EncryptCreatesAnOutputFile) {
@@ -45,7 +46,7 @@ TEST(EncryptDecryptTest, EncryptCreatesAnOutputFile) {
     input_file << "hello security";
   }
 
-  encrypt_file(input_path.string(), "lowercase");
+  encrypt_file(Task("encrypt", input_path.string()), "lowercase");
 
   EXPECT_TRUE(std::filesystem::exists(output_path));
 
@@ -66,8 +67,8 @@ TEST(EncryptDecryptTest, EncryptThenDecryptShouldRoundTrip) {
     input_file << "roundtrip me";
   }
 
-  encrypt_file(input_path.string(), "lowercase");
-  decrypt_file(encrypted_path.string(), "lowercase");
+  encrypt_file(Task("encrypt", input_path.string()), "lowercase");
+  decrypt_file(Task("decrypt", encrypted_path.string()), "lowercase");
 
   std::ifstream decrypted_file(decrypted_path);
   std::string decrypted_content;

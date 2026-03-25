@@ -63,9 +63,9 @@ auto is_valid_password(const std::string &password) -> bool {
 }
 
 // TODO: Make file read a stream, not a dump
-auto encrypt_file(std::string file_name, std::string password) -> void {
+auto encrypt_file(const Task& task, std::string password) -> void {
   // TODO: Add error handling
-  std::ifstream file_istream(file_name, std::ios::binary);
+  std::ifstream file_istream(task.file_name, std::ios::binary);
 
   std::vector<unsigned char> file_text{};
   unsigned char buffer = 0;
@@ -103,7 +103,7 @@ auto encrypt_file(std::string file_name, std::string password) -> void {
     throw std::runtime_error("Encryption failed");
   }
 
-  std::ofstream file_ofstream(file_name + ".enc", std::ios::binary);
+  std::ofstream file_ofstream(task.file_name + ".enc", std::ios::binary);
   file_ofstream.write("SEC\n", 4);
   file_ofstream.write("1.0\n", 4);
   // TODO: Figure out how to avoid reinterpret_cast
@@ -127,9 +127,9 @@ auto encrypt_file(std::string file_name, std::string password) -> void {
   }
 }
 
-auto decrypt_file(std::string file_name, std::string password) -> void {
+auto decrypt_file(const Task& task, std::string password) -> void {
   // Read encrypted file
-  std::ifstream file_istream(file_name, std::ios::binary);
+  std::ifstream file_istream(task.file_name, std::ios::binary);
 
   std::array<char, 4> magic{};
   file_istream.read(magic.data(), magic.size());
@@ -176,7 +176,7 @@ auto decrypt_file(std::string file_name, std::string password) -> void {
   }
 
   // Dump decrypted file on disk.
-  std::ofstream file_ofstream(file_name + ".dec", std::ios::binary);
+  std::ofstream file_ofstream(task.file_name + ".dec", std::ios::binary);
   file_ofstream.write(reinterpret_cast<const char *>(file_text.data()),
                       static_cast<std::streamsize>(file_text.size()));
 }
