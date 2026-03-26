@@ -15,11 +15,10 @@
 #include <iostream>
 #include <print>
 #include <stdexcept>
+#include <string>
 #include <vector>
 
 namespace {
-constexpr std::size_t MIN_LENGTH = 18;
-
 class TerminalSettings {
  public:
   TerminalSettings() {
@@ -189,9 +188,130 @@ class EncryptedFileMetadata {
   std::array<unsigned char, crypto_pwhash_SALTBYTES> salt_{};
   std::array<unsigned char, crypto_secretbox_NONCEBYTES> nonce_{};
 };
+
+class Key {
+ public:
+  Key(const detail::Password &password, const EncryptedFileMetadata &metadata) {
+    if (crypto_pwhash(key_.data(), key_.size(), password.password().c_str(),
+                      password.password().length(), metadata.salt().data(),
+                      static_cast<unsigned long long>(metadata.opslimit()),
+                      static_cast<std::size_t>(metadata.memlimit()),
+                      static_cast<int>(metadata.alg())) != 0) {
+      throw std::runtime_error("Failed to create key");
+    }
+  }
+  ~Key() { sodium_memzero(key_.data(), key_.size()); }
+  Key(const Key &) = delete;
+  Key(Key &&other) noexcept : key_(other.key_) {
+    sodium_memzero(other.key_.data(), other.key_.size());
+  }
+  auto operator=(const Key &) -> Key & = delete;
+  auto operator=(Key &&other) noexcept -> Key & {
+    if (this != &other) {
+      sodium_memzero(key_.data(), key_.size());
+      key_ = other.key_;
+      sodium_memzero(other.key_.data(), other.key_.size());
+    }
+    return *this;
+  }
+
+  [[nodiscard]] auto key_data() const -> const unsigned char * {
+    return key_.data();
+  }
+
+ private:
+  std::array<unsigned char, crypto_secretbox_KEYBYTES> key_{};
+};
+
+auto derive_key(const EncryptedFileMetadata &metadata) -> Key {
+  const detail::Password password_obj;
+  return {password_obj, metadata};
+}
+
+auto cook_encryption(const EncryptedFileMetadata &metadata,
+                     const std::vector<unsigned char> &file_text)
+    -> std::vector<unsigned char> {
+  std::vector<unsigned char> encrypted_text(file_text.size() +
+                                            crypto_secretbox_MACBYTES);
+  {
+    const Key key = derive_key(metadata);
+
+    if (crypto_secretbox_easy(encrypted_text.data(), file_text.data(),
+                              file_text.size(), metadata.nonce().data(),
+                              key.key_data()) != 0) {
+      throw std::runtime_error("Encryption failed");
+    }
+  }
+
+  return encrypted_text;
+}
+
+auto cook_decryption(const EncryptedFileMetadata &metadata,
+                     const std::vector<unsigned char> &encrypted_text)
+    -> std::vector<unsigned char> {
+  if (encrypted_text.size() < crypto_secretbox_MACBYTES) {
+    throw std::runtime_error("Encrypted file is too short. Might be damaged.");
+  }
+
+  std::vector<unsigned char> file_text(encrypted_text.size() -
+                                       crypto_secretbox_MACBYTES);
+  {
+    const Key key = derive_key(metadata);
+
+    if (crypto_secretbox_open_easy(
+            file_text.data(), encrypted_text.data(), encrypted_text.size(),
+            metadata.nonce().data(), key.key_data()) != 0) {
+      throw std::runtime_error("Decryption failed");
+    }
+  }
+
+  return file_text;
+}
 }  // namespace
 
-auto encrypt_file(const Task &task, const std::string &password) -> void {
+namespace detail {
+Password::Password() {
+  std::println("Password must be lowercase alphabetic, minimum length is {}",
+               MIN_LENGTH);
+  std::println("Please insert password: ");
+
+  TerminalSettings terminal_settings;
+  terminal_settings.turn_off_echo();
+
+  while (attempts_ < 3) {
+    if (!(std::cin >> password_)) {
+      throw std::runtime_error("Cannot read password");
+    }
+
+    if (is_valid_(password_)) {
+      std::println("Cool, thanks!");
+      return;
+    }
+    std::println("Invalid password");
+    ++attempts_;
+  }
+
+  throw std::runtime_error("Too many attempts");
+}
+
+Password::Password(std::string password) : password_(std::move(password)) {
+  if (!is_valid_(password_)) {
+    throw std::runtime_error("Invalid password");
+  }
+}
+
+Password::~Password() { sodium_memzero(password_.data(), password_.size()); }
+
+auto Password::password() const -> const std::string & { return password_; }
+
+auto Password::is_valid_(const std::string &password) -> bool {
+  return password.length() >= MIN_LENGTH &&
+         !std::ranges::any_of(password,
+                              [](char ch) { return ch < 'a' or ch > 'z'; });
+}
+}  // namespace detail
+
+auto encrypt_file(const Task &task) -> void {
   // Open file
   std::ifstream file_istream(task.file_name, std::ios::binary);
   if (!file_istream.is_open()) {
@@ -210,26 +330,10 @@ auto encrypt_file(const Task &task, const std::string &password) -> void {
     throw std::runtime_error("Cannot read input file: " + task.file_name);
   }
 
+  // create metadata
   const EncryptedFileMetadata metadata;
-
-  // derive key from password + metadata (KDF)
-  std::array<unsigned char, crypto_secretbox_KEYBYTES> key{};
-  if (crypto_pwhash(key.data(), key.size(), password.c_str(), password.length(),
-                    metadata.salt().data(),
-                    static_cast<unsigned long long>(metadata.opslimit()),
-                    static_cast<std::size_t>(metadata.memlimit()),
-                    static_cast<int>(metadata.alg())) != 0) {
-    throw std::runtime_error("Failed to create key");
-  }
-
-  // encrypt file bytes
-  std::vector<unsigned char> encrypted_text(file_text.size() +
-                                            crypto_secretbox_MACBYTES);
-  if (crypto_secretbox_easy(encrypted_text.data(), file_text.data(),
-                            file_text.size(), metadata.nonce().data(),
-                            key.data()) != 0) {
-    throw std::runtime_error("Encryption failed");
-  }
+  const std::vector<unsigned char> encrypted_text =
+      cook_encryption(metadata, file_text);
 
   // write file to disk, metadata first, then the actual encrypted text
   const std::string output_file_name = task.file_name + ".enc";
@@ -247,7 +351,7 @@ auto encrypt_file(const Task &task, const std::string &password) -> void {
   }
 }
 
-auto decrypt_file(const Task &task, const std::string &password) -> void {
+auto decrypt_file(const Task &task) -> void {
   // Load metadata from file
   const auto encrypted_file_metadata = EncryptedFileMetadata(task.file_name);
 
@@ -269,29 +373,8 @@ auto decrypt_file(const Task &task, const std::string &password) -> void {
     throw std::runtime_error("Cannot read encrypted text");
   }
 
-  // Generate key
-  std::array<unsigned char, crypto_secretbox_KEYBYTES> key{};
-  if (crypto_pwhash(key.data(), key.size(), password.c_str(), password.length(),
-                    encrypted_file_metadata.salt().data(),
-                    static_cast<unsigned long long>(
-                        encrypted_file_metadata.opslimit()),
-                    static_cast<std::size_t>(
-                        encrypted_file_metadata.memlimit()),
-                    static_cast<int>(encrypted_file_metadata.alg())) != 0) {
-    throw std::runtime_error("Cannot create key");
-  }
-
-  // Decrypt file
-  std::vector<unsigned char> file_text{};
-  if (encrypted_text.size() < crypto_secretbox_MACBYTES) {
-    throw std::runtime_error("Encrypted file is too short. Might be damaged.");
-  }
-  file_text.resize(encrypted_text.size() - crypto_secretbox_MACBYTES);
-  if (crypto_secretbox_open_easy(
-          file_text.data(), encrypted_text.data(), encrypted_text.size(),
-          encrypted_file_metadata.nonce().data(), key.data()) != 0) {
-    throw std::runtime_error("Decryption failed");
-  }
+  const std::vector<unsigned char> file_text =
+      cook_decryption(encrypted_file_metadata, encrypted_text);
 
   // Dump decrypted file on disk.
   std::ofstream file_ofstream(task.file_name + ".dec", std::ios::binary);
@@ -306,34 +389,93 @@ auto decrypt_file(const Task &task, const std::string &password) -> void {
   }
 }
 
-auto is_valid_password(const std::string &password) -> bool {
-  if (password.length() < MIN_LENGTH) {
-    return false;
+namespace detail {
+auto encrypt_file(const Task &task, const Password &password) -> void {
+  std::ifstream file_istream(task.file_name, std::ios::binary);
+  if (!file_istream.is_open()) {
+    throw std::runtime_error("Cannot open file: " + task.file_name);
   }
-  return !std::ranges::any_of(password,
-                              [](char ch) { return ch < 'a' or ch > 'z'; });
-}
 
-auto get_password() -> std::string {
-  std::println("Password must be lowercase alphabetic, minimum length is {}",
-               MIN_LENGTH);
-  std::println("Please insert password: ");
+  std::vector<unsigned char> file_text{};
+  unsigned char buffer = 0;
+  while (file_istream.read(reinterpret_cast<char *>(&buffer), 1)) {
+    file_text.push_back(buffer);
+  }
+  if (!file_istream.eof()) {
+    throw std::runtime_error("Cannot read input file: " + task.file_name);
+  }
 
-  TerminalSettings terminal_settings;
-  terminal_settings.turn_off_echo();
-
-  std::string password;
-  int failed_attempts = 0;
-  while (failed_attempts < 3) {
-    std::cin >> password;
-
-    if (is_valid_password(password)) {
-      std::println("Cool, thanks!");
-      return password;
+  const EncryptedFileMetadata metadata;
+  std::vector<unsigned char> encrypted_text(file_text.size() +
+                                            crypto_secretbox_MACBYTES);
+  {
+    const Key key(password, metadata);
+    if (crypto_secretbox_easy(encrypted_text.data(), file_text.data(),
+                              file_text.size(), metadata.nonce().data(),
+                              key.key_data()) != 0) {
+      throw std::runtime_error("Encryption failed");
     }
-    std::println("Invalid password");
-    ++failed_attempts;
   }
 
-  throw std::runtime_error("Too many attempts");
+  const std::string output_file_name = task.file_name + ".enc";
+  metadata.write_to_file(output_file_name);
+  std::ofstream file_ofstream(output_file_name,
+                              std::ios::binary | std::ios::app);
+  if (!file_ofstream.is_open()) {
+    throw std::runtime_error("Cannot open file for writing: " +
+                             output_file_name);
+  }
+  if (!file_ofstream.write(
+          reinterpret_cast<const char *>(encrypted_text.data()),
+          static_cast<std::streamsize>(encrypted_text.size()))) {
+    throw std::runtime_error("Cannot write encrypted text");
+  }
 }
+
+auto decrypt_file(const Task &task, const Password &password) -> void {
+  const auto encrypted_file_metadata = EncryptedFileMetadata(task.file_name);
+
+  std::ifstream file_istream(task.file_name, std::ios::binary);
+  if (!file_istream.is_open()) {
+    throw std::runtime_error("Cannot open file for reading: " + task.file_name);
+  }
+  file_istream.seekg(encrypted_file_metadata.size());
+  if (!file_istream) {
+    throw std::runtime_error("Cannot get to encrypted text");
+  }
+  std::vector<unsigned char> encrypted_text{};
+  unsigned char buffer = 0;
+  while (file_istream.read(reinterpret_cast<char *>(&buffer), 1)) {
+    encrypted_text.push_back(buffer);
+  }
+  if (!file_istream.eof()) {
+    throw std::runtime_error("Cannot read encrypted text");
+  }
+
+  if (encrypted_text.size() < crypto_secretbox_MACBYTES) {
+    throw std::runtime_error("Encrypted file is too short. Might be damaged.");
+  }
+
+  std::vector<unsigned char> file_text(encrypted_text.size() -
+                                       crypto_secretbox_MACBYTES);
+  {
+    const Key key(password, encrypted_file_metadata);
+    if (crypto_secretbox_open_easy(
+            file_text.data(), encrypted_text.data(), encrypted_text.size(),
+            encrypted_file_metadata.nonce().data(), key.key_data()) != 0) {
+      throw std::runtime_error("Decryption failed");
+    }
+  }
+
+  std::ofstream file_ofstream(task.file_name + ".dec", std::ios::binary);
+  const std::string output_file_name = task.file_name + ".dec";
+  if (!file_ofstream.is_open()) {
+    throw std::runtime_error("Cannot open file for writing: " +
+                             output_file_name);
+  }
+  if (!file_ofstream.write(reinterpret_cast<const char *>(file_text.data()),
+                           static_cast<std::streamsize>(file_text.size()))) {
+    throw std::runtime_error("Cannot write decrypted file");
+  }
+}
+}  // namespace detail

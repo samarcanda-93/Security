@@ -5,9 +5,9 @@
 
 #include "encrypt_decrypt.hpp"
 
-auto Encrypt::execute() -> void { encrypt_file(task_, get_password()); }
+auto Encrypt::execute() -> void { encrypt_file(task_); }
 
-auto Decrypt::execute() -> void { decrypt_file(task_, get_password()); }
+auto Decrypt::execute() -> void { decrypt_file(task_); }
 
 auto make_command(const Task& task) -> std::unique_ptr<Command> {
   switch (task.command_type) {

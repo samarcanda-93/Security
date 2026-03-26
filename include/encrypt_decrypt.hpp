@@ -4,8 +4,30 @@
 
 #include "command.hpp"
 
-auto decrypt_file(const Task& task, const std::string& password) -> void;
-auto encrypt_file(const Task& task, const std::string& password) -> void;
+auto encrypt_file(const Task& task) -> void;
+auto decrypt_file(const Task& task) -> void;
 
-auto get_password() -> std::string;
-auto is_valid_password(const std::string& password) -> bool;
+namespace detail {
+class Password {
+ public:
+  Password();
+  ~Password();
+  Password(const Password&) = delete;
+  Password(Password&&) = delete;
+  auto operator=(const Password&) -> Password& = delete;
+  auto operator=(Password&&) -> Password& = delete;
+  explicit Password(std::string password);
+
+  [[nodiscard]] auto password() const -> const std::string&;
+
+ private:
+  static auto is_valid_(const std::string& password) -> bool;
+
+  std::string password_;
+  int attempts_ = 0;
+  static constexpr std::size_t MIN_LENGTH = 18;
+};
+
+auto encrypt_file(const Task& task, const Password& password) -> void;
+auto decrypt_file(const Task& task, const Password& password) -> void;
+}  // namespace detail
