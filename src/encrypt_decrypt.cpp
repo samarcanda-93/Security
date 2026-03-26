@@ -19,6 +19,8 @@
 #include <vector>
 
 namespace {
+constexpr std::size_t CHUNK_SIZE = 4096;
+
 class TerminalSettings {
  public:
   TerminalSettings() {
@@ -222,51 +224,6 @@ class Key {
  private:
   std::array<unsigned char, crypto_secretbox_KEYBYTES> key_{};
 };
-
-auto derive_key(const EncryptedFileMetadata &metadata) -> Key {
-  const detail::Password password_obj;
-  return {password_obj, metadata};
-}
-
-auto cook_encryption(const EncryptedFileMetadata &metadata,
-                     const std::vector<unsigned char> &file_text)
-    -> std::vector<unsigned char> {
-  std::vector<unsigned char> encrypted_text(file_text.size() +
-                                            crypto_secretbox_MACBYTES);
-  {
-    const Key key = derive_key(metadata);
-
-    if (crypto_secretbox_easy(encrypted_text.data(), file_text.data(),
-                              file_text.size(), metadata.nonce().data(),
-                              key.key_data()) != 0) {
-      throw std::runtime_error("Encryption failed");
-    }
-  }
-
-  return encrypted_text;
-}
-
-auto cook_decryption(const EncryptedFileMetadata &metadata,
-                     const std::vector<unsigned char> &encrypted_text)
-    -> std::vector<unsigned char> {
-  if (encrypted_text.size() < crypto_secretbox_MACBYTES) {
-    throw std::runtime_error("Encrypted file is too short. Might be damaged.");
-  }
-
-  std::vector<unsigned char> file_text(encrypted_text.size() -
-                                       crypto_secretbox_MACBYTES);
-  {
-    const Key key = derive_key(metadata);
-
-    if (crypto_secretbox_open_easy(
-            file_text.data(), encrypted_text.data(), encrypted_text.size(),
-            metadata.nonce().data(), key.key_data()) != 0) {
-      throw std::runtime_error("Decryption failed");
-    }
-  }
-
-  return file_text;
-}
 }  // namespace
 
 namespace detail {
@@ -311,82 +268,185 @@ auto Password::is_valid_(const std::string &password) -> bool {
 }
 }  // namespace detail
 
+class Encrypter {
+ public:
+  Encrypter(const std::string &file_name)
+      : file_istream_(file_name, std::ios::binary),
+        key_(derive_key(metadata_)),
+        file_ofstream_(file_name + ".enc", std::ios::binary | std::ios::app),
+        output_file_name_(file_name + ".enc") {
+    if (!file_istream_.is_open()) {
+      throw std::runtime_error("Cannot open file: " + file_name);
+    }
+    if (!file_ofstream_.is_open()) {
+      throw std::runtime_error("Cannot open file for writing: " +
+                               output_file_name_);
+    }
+
+    // Write metadata to file, once and for all
+    metadata_.write_to_file(output_file_name_);
+  }
+
+  auto encrypt_file() {
+    do {
+      encrypt_file_chunk_();
+    } while (bytes_read_ == CHUNK_SIZE);
+  }
+
+ private:
+  static auto derive_key(const EncryptedFileMetadata &metadata) -> Key {
+    return {detail::Password(), metadata};
+  }
+
+  auto cook_encryption_() const -> std::vector<unsigned char> {
+    std::vector<unsigned char> encrypted_text(bytes_read_ +
+                                              crypto_secretbox_MACBYTES);
+    if (crypto_secretbox_easy(encrypted_text.data(), file_text_chunk_.data(),
+                              bytes_read_, metadata_.nonce().data(),
+                              key_.key_data()) != 0) {
+      throw std::runtime_error("Encryption failed");
+    }
+
+    return encrypted_text;
+  }
+
+  auto encrypt_file_chunk_() -> void {
+    // Dump chunk to vector of chars
+    bytes_read_ = 0;
+    for (std::size_t i = 0; i < CHUNK_SIZE; ++i) {
+      unsigned char buffer = 0;
+      if (file_istream_.read(reinterpret_cast<char *>(&buffer), 1)) {
+        file_text_chunk_.at(i) = buffer;
+        ++bytes_read_;
+      } else {
+        break;
+      }
+    }
+
+    if (bytes_read_ == 0) {
+      return;
+    }
+
+    encrypted_text_chunk_ = cook_encryption_();
+
+    if (!file_ofstream_.write(
+            reinterpret_cast<const char *>(encrypted_text_chunk_.data()),
+            static_cast<std::streamsize>(encrypted_text_chunk_.size()))) {
+      throw std::runtime_error("Cannot write encrypted chunk");
+    }
+  }
+
+  std::ifstream file_istream_;
+  EncryptedFileMetadata metadata_;
+  Key key_;
+  std::ofstream file_ofstream_;
+  std::string output_file_name_;
+  std::size_t bytes_read_{0};
+  std::array<unsigned char, CHUNK_SIZE> file_text_chunk_{};
+  std::vector<unsigned char> encrypted_text_chunk_;
+};
+
+class Decrypter {
+ public:
+  Decrypter(const std::string &file_name)
+      : file_istream_(file_name, std::ios::binary),
+        metadata_(file_name),
+        key_(derive_key(metadata_)),
+        file_ofstream_(file_name + ".dec", std::ios::binary | std::ios::app),
+        output_file_name_(file_name + ".dec") {
+    if (!file_istream_.is_open()) {
+      throw std::runtime_error("Cannot open file: " + file_name);
+    }
+    if (!file_ofstream_.is_open()) {
+      throw std::runtime_error("Cannot open file for writing: " +
+                               output_file_name_);
+    }
+
+    // Go to read the ecrypted text
+    file_istream_.seekg(metadata_.size());
+    if (!file_istream_) {
+      throw std::runtime_error("Cannot get to encrypted text");
+    }
+  }
+
+  auto decrypt_file() {
+    do {
+      decrypt_file_chunk_();
+    } while (bytes_read_ == CHUNK_SIZE + crypto_secretbox_MACBYTES);
+  }
+
+ private:
+  // TODO: Derive key should live outside of the classes.
+  static auto derive_key(const EncryptedFileMetadata &metadata) -> Key {
+    return Key{detail::Password(), metadata};
+  }
+
+  auto cook_decryption_() -> std::vector<unsigned char> {
+    if (bytes_read_ < crypto_secretbox_MACBYTES) {
+      throw std::runtime_error(
+          "Encrypted file is too short. Might be damaged.");
+    }
+    file_text_chunk_.resize(bytes_read_ - crypto_secretbox_MACBYTES);
+
+    if (crypto_secretbox_open_easy(
+            file_text_chunk_.data(), encrypted_text_chunk_.data(), bytes_read_,
+            metadata_.nonce().data(), key_.key_data()) != 0) {
+      throw std::runtime_error("Decryption failed");
+    }
+
+    return file_text_chunk_;
+  }
+
+  auto decrypt_file_chunk_() -> void {
+    bytes_read_ = 0;
+
+    for (std::size_t i = 0; i < CHUNK_SIZE + crypto_secretbox_MACBYTES; ++i) {
+      unsigned char buffer = 0;
+      if (file_istream_.read(reinterpret_cast<char *>(&buffer), 1)) {
+        encrypted_text_chunk_.at(i) = buffer;
+        ++bytes_read_;
+      } else {
+        break;
+      }
+    }
+
+    if (bytes_read_ == 0) {
+      return;
+    }
+
+    file_text_chunk_ = cook_decryption_();
+
+    if (!file_ofstream_.is_open()) {
+      throw std::runtime_error("Cannot open file for writing: " +
+                               output_file_name_);
+    }
+
+    if (!file_ofstream_.write(
+            reinterpret_cast<const char *>(file_text_chunk_.data()),
+            static_cast<std::streamsize>(file_text_chunk_.size()))) {
+      throw std::runtime_error("Cannot write decrypted chunk");
+    }
+  }
+
+  std::ifstream file_istream_;
+  EncryptedFileMetadata metadata_;
+  Key key_;
+  std::ofstream file_ofstream_;
+  std::string output_file_name_;
+  std::size_t bytes_read_{0};
+  std::array<unsigned char, CHUNK_SIZE + crypto_secretbox_MACBYTES>
+      encrypted_text_chunk_;
+  std::vector<unsigned char> file_text_chunk_;
+};
+
 auto encrypt_file(const Task &task) -> void {
-  // Open file
-  std::ifstream file_istream(task.file_name, std::ios::binary);
-  if (!file_istream.is_open()) {
-    throw std::runtime_error("Cannot open file: " + task.file_name);
-  }
-
-  // Dump file to vector of chars
-  std::vector<unsigned char> file_text{};
-  unsigned char buffer = 0;
-  while (file_istream.read(reinterpret_cast<char *>(&buffer), 1)) {
-    file_text.push_back(buffer);
-  }
-
-  // Check the eof was reached properly
-  if (!file_istream.eof()) {
-    throw std::runtime_error("Cannot read input file: " + task.file_name);
-  }
-
-  // create metadata
-  const EncryptedFileMetadata metadata;
-  const std::vector<unsigned char> encrypted_text =
-      cook_encryption(metadata, file_text);
-
-  // write file to disk, metadata first, then the actual encrypted text
-  const std::string output_file_name = task.file_name + ".enc";
-  metadata.write_to_file(output_file_name);
-  std::ofstream file_ofstream(output_file_name,
-                              std::ios::binary | std::ios::app);
-  if (!file_ofstream.is_open()) {
-    throw std::runtime_error("Cannot open file for writing: " +
-                             output_file_name);
-  }
-  if (!file_ofstream.write(
-          reinterpret_cast<const char *>(encrypted_text.data()),
-          static_cast<std::streamsize>(encrypted_text.size()))) {
-    throw std::runtime_error("Cannot write encrypted text");
-  }
+  Encrypter encrypter(task.file_name);
+  encrypter.encrypt_file();
 }
 
 auto decrypt_file(const Task &task) -> void {
-  // Load metadata from file
-  const auto encrypted_file_metadata = EncryptedFileMetadata(task.file_name);
-
-  // Load encrypted text from file
-  std::ifstream file_istream(task.file_name, std::ios::binary);
-  if (!file_istream.is_open()) {
-    throw std::runtime_error("Cannot open file for reading: " + task.file_name);
-  }
-  file_istream.seekg(encrypted_file_metadata.size());
-  if (!file_istream) {
-    throw std::runtime_error("Cannot get to encrypted text");
-  }
-  std::vector<unsigned char> encrypted_text{};
-  unsigned char buffer = 0;
-  while (file_istream.read(reinterpret_cast<char *>(&buffer), 1)) {
-    encrypted_text.push_back(buffer);
-  }
-  if (!file_istream.eof()) {
-    throw std::runtime_error("Cannot read encrypted text");
-  }
-
-  const std::vector<unsigned char> file_text =
-      cook_decryption(encrypted_file_metadata, encrypted_text);
-
-  // Dump decrypted file on disk.
-  std::ofstream file_ofstream(task.file_name + ".dec", std::ios::binary);
-  const std::string output_file_name = task.file_name + ".dec";
-  if (!file_ofstream.is_open()) {
-    throw std::runtime_error("Cannot open file for writing: " +
-                             output_file_name);
-  }
-  if (!file_ofstream.write(reinterpret_cast<const char *>(file_text.data()),
-                           static_cast<std::streamsize>(file_text.size()))) {
-    throw std::runtime_error("Cannot write decrypted file");
-  }
+  Decrypter decrypter(task.file_name);
+  decrypter.decrypt_file();
 }
 
 namespace detail {
@@ -404,6 +464,11 @@ auto encrypt_file(const Task &task, const Password &password) -> void {
   if (!file_istream.eof()) {
     throw std::runtime_error("Cannot read input file: " + task.file_name);
   }
+
+  // TODO: finish the streaming/file-size story
+  // TODO: keep sensitive lifetime tight
+  // TODO: stabilize the test surface
+  // TODO: clean up the current encrypt/decrypt flow
 
   const EncryptedFileMetadata metadata;
   std::vector<unsigned char> encrypted_text(file_text.size() +
