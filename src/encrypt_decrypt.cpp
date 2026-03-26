@@ -63,7 +63,7 @@ auto is_valid_password(const std::string &password) -> bool {
 }
 
 // TODO: Make file read a stream, not a dump
-auto encrypt_file(const Task& task, std::string password) -> void {
+auto encrypt_file(const Task &task, std::string password) -> void {
   // TODO: Add error handling
   std::ifstream file_istream(task.file_name, std::ios::binary);
 
@@ -127,7 +127,7 @@ auto encrypt_file(const Task& task, std::string password) -> void {
   }
 }
 
-auto decrypt_file(const Task& task, std::string password) -> void {
+auto decrypt_file(const Task &task, std::string password) -> void {
   // Read encrypted file
   std::ifstream file_istream(task.file_name, std::ios::binary);
 
@@ -168,6 +168,9 @@ auto decrypt_file(const Task& task, std::string password) -> void {
 
   // Decrypt file
   std::vector<unsigned char> file_text{};
+  if (enc_chars.size() < crypto_secretbox_MACBYTES) {
+    throw std::runtime_error("Encrypted file is too short. Might be damaged.");
+  }
   file_text.resize(enc_chars.size() - crypto_secretbox_MACBYTES);
   if (crypto_secretbox_open_easy(file_text.data(), enc_chars.data(),
                                  enc_chars.size(), nonce.data(),

@@ -7,7 +7,7 @@
 #include <string>
 #include <utility>
 
-enum class CommandType : u_int8_t {
+enum class TaskType : u_int8_t {
   Encrypt,
   Decrypt,
 };
@@ -17,15 +17,15 @@ struct Task {
   Task(std::string command_name, std::string file_name)
       : file_name(std::move(file_name)) {
     if (command_name == "encrypt") {
-      command_type = CommandType::Encrypt;
+      command_type = TaskType::Encrypt;
     } else if (command_name == "decrypt") {
-      command_type = CommandType::Decrypt;
+      command_type = TaskType::Decrypt;
     } else {
       throw std::invalid_argument("Don't know this command: " + command_name);
     }
   }
 
-  CommandType command_type;
+  TaskType command_type;
   std::string file_name;
 };
 
