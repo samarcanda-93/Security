@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <fstream>
 #include <iostream>
 #include <print>
@@ -47,9 +48,9 @@ class TerminalSettings {
 class EncryptedFileMetadata {
  public:
   EncryptedFileMetadata(
-      int file_alg = crypto_pwhash_ALG_DEFAULT,
-      unsigned int file_opslimit = crypto_pwhash_OPSLIMIT_INTERACTIVE,
-      unsigned int file_memlimit = crypto_pwhash_MEMLIMIT_INTERACTIVE)
+      std::int32_t file_alg = crypto_pwhash_ALG_DEFAULT,
+      std::uint64_t file_opslimit = crypto_pwhash_OPSLIMIT_INTERACTIVE,
+      std::uint64_t file_memlimit = crypto_pwhash_MEMLIMIT_INTERACTIVE)
       : alg_(file_alg), opslimit_(file_opslimit), memlimit_(file_memlimit) {
     randombytes_buf(salt_.data(), salt_.size());
     randombytes_buf(nonce_.data(), nonce_.size());
@@ -100,11 +101,11 @@ class EncryptedFileMetadata {
     validate();
   }
 
-  [[nodiscard]] auto alg() const noexcept -> int { return alg_; }
-  [[nodiscard]] auto opslimit() const noexcept -> unsigned int {
+  [[nodiscard]] auto alg() const noexcept -> std::int32_t { return alg_; }
+  [[nodiscard]] auto opslimit() const noexcept -> std::uint64_t {
     return opslimit_;
   }
-  [[nodiscard]] auto memlimit() const noexcept -> unsigned int {
+  [[nodiscard]] auto memlimit() const noexcept -> std::uint64_t {
     return memlimit_;
   }
   [[nodiscard]] auto salt() const noexcept
@@ -161,13 +162,13 @@ class EncryptedFileMetadata {
 
  private:
   auto validate() const -> void {
-    static const std::array<int, 3> ValidAlgorithms{
+    static const std::array<std::int32_t, 3> ValidAlgorithms{
         crypto_pwhash_ALG_ARGON2I13, crypto_pwhash_ALG_ARGON2ID13,
         crypto_pwhash_ALG_DEFAULT};
-    static const std::array<unsigned int, 3> ValidOpslimits{
+    static const std::array<std::uint64_t, 3> ValidOpslimits{
         crypto_pwhash_OPSLIMIT_INTERACTIVE, crypto_pwhash_OPSLIMIT_MODERATE,
         crypto_pwhash_OPSLIMIT_SENSITIVE};
-    static const std::array<unsigned int, 3> ValidMemlimits{
+    static const std::array<std::uint64_t, 3> ValidMemlimits{
         crypto_pwhash_MEMLIMIT_INTERACTIVE, crypto_pwhash_MEMLIMIT_MODERATE,
         crypto_pwhash_MEMLIMIT_SENSITIVE};
 
@@ -182,9 +183,9 @@ class EncryptedFileMetadata {
     }
   }
 
-  int alg_{};
-  unsigned int opslimit_{};
-  unsigned int memlimit_{};
+  std::int32_t alg_{};
+  std::uint64_t opslimit_{};
+  std::uint64_t memlimit_{};
   std::array<unsigned char, crypto_pwhash_SALTBYTES> salt_{};
   std::array<unsigned char, crypto_secretbox_NONCEBYTES> nonce_{};
 };
@@ -214,8 +215,10 @@ auto encrypt_file(const Task &task, const std::string &password) -> void {
   // derive key from password + metadata (KDF)
   std::array<unsigned char, crypto_secretbox_KEYBYTES> key{};
   if (crypto_pwhash(key.data(), key.size(), password.c_str(), password.length(),
-                    metadata.salt().data(), metadata.opslimit(),
-                    metadata.memlimit(), metadata.alg()) != 0) {
+                    metadata.salt().data(),
+                    static_cast<unsigned long long>(metadata.opslimit()),
+                    static_cast<std::size_t>(metadata.memlimit()),
+                    static_cast<int>(metadata.alg())) != 0) {
     throw std::runtime_error("Failed to create key");
   }
 
@@ -270,9 +273,11 @@ auto decrypt_file(const Task &task, const std::string &password) -> void {
   std::array<unsigned char, crypto_secretbox_KEYBYTES> key{};
   if (crypto_pwhash(key.data(), key.size(), password.c_str(), password.length(),
                     encrypted_file_metadata.salt().data(),
-                    encrypted_file_metadata.opslimit(),
-                    encrypted_file_metadata.memlimit(),
-                    encrypted_file_metadata.alg()) != 0) {
+                    static_cast<unsigned long long>(
+                        encrypted_file_metadata.opslimit()),
+                    static_cast<std::size_t>(
+                        encrypted_file_metadata.memlimit()),
+                    static_cast<int>(encrypted_file_metadata.alg())) != 0) {
     throw std::runtime_error("Cannot create key");
   }
 
