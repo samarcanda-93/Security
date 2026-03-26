@@ -12,7 +12,7 @@
 namespace {
 
 TEST(PasswordRulesTest, AcceptsLowercasePasswordWithMinimumLength) {
-  EXPECT_TRUE(is_valid_password("lowercase"));
+  EXPECT_TRUE(is_valid_password("alongsentencepasswordiseasytoremember"));
 }
 
 TEST(PasswordRulesTest, RejectsPasswordThatIsTooShort) {
@@ -20,20 +20,53 @@ TEST(PasswordRulesTest, RejectsPasswordThatIsTooShort) {
 }
 
 TEST(PasswordRulesTest, RejectsPasswordWithUppercaseCharacters) {
-  EXPECT_FALSE(is_valid_password("Lowercase"));
+  EXPECT_FALSE(is_valid_password("IfThePasswordIsLongYouDontNeedUpperCase"));
 }
 
 TEST(PasswordRulesTest, RejectsPasswordWithDigitsOrSymbols) {
-  EXPECT_FALSE(is_valid_password("lower123"));
-  EXPECT_FALSE(is_valid_password("lowercase!"));
+  EXPECT_FALSE(is_valid_password("ifthepasswordislongyoudontneed123"));
+  EXPECT_FALSE(
+      is_valid_password("ifthepasswordislongyoudontneedspecialcharachters!"));
 }
 
 TEST(EncryptDecryptTest, EncryptFileDoesNotThrow) {
-  EXPECT_NO_THROW(encrypt_file(Task("encrypt", "a_file.txt"), "lowercase"));
+  const auto input_path = std::filesystem::path("encrypt_no_throw.txt");
+  const auto output_path = std::filesystem::path("encrypt_no_throw.txt.enc");
+
+  {
+    std::ofstream input_file(input_path);
+    ASSERT_TRUE(input_file.is_open());
+    input_file << "hello security";
+  }
+
+  EXPECT_NO_THROW(encrypt_file(Task("encrypt", input_path.string()),
+                               "alongsentencepasswordiseasytoremember"));
+
+  std::filesystem::remove(input_path);
+  std::filesystem::remove(output_path);
 }
 
 TEST(EncryptDecryptTest, DecryptFileDoesNotThrow) {
-  EXPECT_NO_THROW(decrypt_file(Task("decrypt", "a_file.txt.enc"), "lowercase"));
+  const auto input_path = std::filesystem::path("decrypt_no_throw.txt");
+  const auto encrypted_path = std::filesystem::path("decrypt_no_throw.txt.enc");
+  const auto decrypted_path =
+      std::filesystem::path("decrypt_no_throw.txt.enc.dec");
+
+  {
+    std::ofstream input_file(input_path);
+    ASSERT_TRUE(input_file.is_open());
+    input_file << "hello security";
+  }
+
+  encrypt_file(Task("encrypt", input_path.string()),
+               "alongsentencepasswordiseasytoremember");
+
+  EXPECT_NO_THROW(decrypt_file(Task("decrypt", encrypted_path.string()),
+                               "alongsentencepasswordiseasytoremember"));
+
+  std::filesystem::remove(input_path);
+  std::filesystem::remove(encrypted_path);
+  std::filesystem::remove(decrypted_path);
 }
 
 TEST(EncryptDecryptTest, EncryptCreatesAnOutputFile) {
@@ -46,7 +79,8 @@ TEST(EncryptDecryptTest, EncryptCreatesAnOutputFile) {
     input_file << "hello security";
   }
 
-  encrypt_file(Task("encrypt", input_path.string()), "lowercase");
+  encrypt_file(Task("encrypt", input_path.string()),
+               "alongsentencepasswordiseasytoremember");
 
   EXPECT_TRUE(std::filesystem::exists(output_path));
 
@@ -67,8 +101,10 @@ TEST(EncryptDecryptTest, EncryptThenDecryptShouldRoundTrip) {
     input_file << "roundtrip me";
   }
 
-  encrypt_file(Task("encrypt", input_path.string()), "lowercase");
-  decrypt_file(Task("decrypt", encrypted_path.string()), "lowercase");
+  encrypt_file(Task("encrypt", input_path.string()),
+               "alongsentencepasswordiseasytoremember");
+  decrypt_file(Task("decrypt", encrypted_path.string()),
+               "alongsentencepasswordiseasytoremember");
 
   std::ifstream decrypted_file(decrypted_path);
   std::string decrypted_content;
