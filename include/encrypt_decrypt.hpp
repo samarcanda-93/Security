@@ -1,33 +1,81 @@
 #pragma once
 
+#include <sodium/crypto_pwhash.h>
+#include <sodium/crypto_secretbox.h>
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <ios>
+#include <stdexcept>
 #include <string>
+#include <utility>
 
-#include "command.hpp"
+#include "credentials.hpp"
 
-auto encrypt_file(const Task& task) -> void;
-auto decrypt_file(const Task& task) -> void;
-
-namespace detail {
-class Password {
- public:
-  Password();
-  ~Password();
-  Password(const Password&) = delete;
-  Password(Password&&) = delete;
-  auto operator=(const Password&) -> Password& = delete;
-  auto operator=(Password&&) -> Password& = delete;
-  explicit Password(std::string password);
-
-  [[nodiscard]] auto password() const -> const std::string&;
-
- private:
-  static auto is_valid_(const std::string& password) -> bool;
-
-  std::string password_;
-  int attempts_ = 0;
-  static constexpr std::size_t MIN_LENGTH = 18;
+enum class TaskType : u_int8_t {
+  Encrypt,
+  Decrypt,
 };
 
-auto encrypt_file(const Task& task, const Password& password) -> void;
-auto decrypt_file(const Task& task, const Password& password) -> void;
+struct Task {
+ public:
+  Task(const std::string& command_name, const std::string& file_name)
+      : file_name(std::move(file_name)) {
+    if (command_name == "encrypt") {
+      command_type = TaskType::Encrypt;
+    } else if (command_name == "decrypt") {
+      command_type = TaskType::Decrypt;
+    } else {
+      throw std::invalid_argument("Don't know this command: " + command_name);
+    }
+  }
+
+  TaskType command_type;
+  std::string file_name;
+};
+
+auto run_task(const Task& task) -> void;
+
+namespace detail {
+class EncryptedFileMetadata {
+ public:
+  EncryptedFileMetadata(
+      std::int32_t file_alg = crypto_pwhash_ALG_DEFAULT,
+      std::uint64_t file_opslimit = crypto_pwhash_OPSLIMIT_INTERACTIVE,
+      std::uint64_t file_memlimit = crypto_pwhash_MEMLIMIT_INTERACTIVE);
+  explicit EncryptedFileMetadata(const std::string& file_name);
+
+  [[nodiscard]] auto alg() const noexcept -> std::int32_t { return alg_; }
+  [[nodiscard]] auto opslimit() const noexcept -> std::uint64_t {
+    return opslimit_;
+  }
+  [[nodiscard]] auto memlimit() const noexcept -> std::uint64_t {
+    return memlimit_;
+  }
+  [[nodiscard]] auto salt() const noexcept
+      -> const std::array<unsigned char, crypto_pwhash_SALTBYTES>& {
+    return salt_;
+  }
+  [[nodiscard]] auto nonce() const noexcept
+      -> const std::array<unsigned char, crypto_secretbox_NONCEBYTES>& {
+    return nonce_;
+  }
+  [[nodiscard]] auto size() const noexcept -> std::streamoff {
+    return static_cast<std::streamoff>(4 + 4 + sizeof(alg_) +
+                                       sizeof(opslimit_) + sizeof(memlimit_) +
+                                       salt_.size() + nonce_.size());
+  }
+
+  auto write_to_file(const std::string& file_name) const -> void;
+
+ private:
+  auto validate_() const -> void;
+
+  std::int32_t alg_{};
+  std::uint64_t opslimit_{};
+  std::uint64_t memlimit_{};
+  std::array<unsigned char, crypto_pwhash_SALTBYTES> salt_{};
+  std::array<unsigned char, crypto_secretbox_NONCEBYTES> nonce_{};
+};
 }  // namespace detail

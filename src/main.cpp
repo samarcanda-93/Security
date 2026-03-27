@@ -4,7 +4,7 @@
 #include <stdexcept>
 #include <string>
 
-#include "command.hpp"
+#include "encrypt_decrypt.hpp"
 
 int main(int argc, char* argv[]) {
   try {
@@ -19,10 +19,7 @@ int main(int argc, char* argv[]) {
                                   std::to_string(argc - 1));
     }
 
-    Task task(argv[1], argv[2]);
-    // Let polymorphism do some magic
-    auto command = make_command(task);
-    command->execute();
+    run_task(Task{argv[1], argv[2]});
 
     return 0;
   } catch (const std::exception& e) {
