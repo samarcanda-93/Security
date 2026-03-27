@@ -22,14 +22,6 @@ auto derive_key(const detail::EncryptedFileMetadata &metadata) -> detail::Key {
 
 }  // namespace
 
-// TODO: Using same nonce for all chunks
-// TODO: Terminal settings return check
-// TODO: Check append behaviour
-// TODO: Read in chunks
-// TODO: Opening file twice in Encrypter/Dec
-
-// TODO: std::array<char, 256> password{}; for password
-
 namespace detail {
 EncryptedFileMetadata::EncryptedFileMetadata(std::int32_t file_alg,
                                              std::uint64_t file_opslimit,
@@ -166,6 +158,7 @@ class AbstractCryptoAlgorithm {
                           const std::string &output_file_name,
                           std::size_t chunk_size)
       : file_istream_(input_file_name, std::ios::binary),
+        // TODO: Check append behaviour
         file_ofstream_(output_file_name, std::ios::binary | std::ios::app),
         output_file_name_(output_file_name),
         chunk_size_(chunk_size) {
@@ -199,6 +192,7 @@ class AbstractCryptoAlgorithm {
 class Encrypter final : public AbstractCryptoAlgorithm {
  public:
   Encrypter(const std::string &file_name)
+      // TODO: Opening file twice in Encrypter/Dec
       : AbstractCryptoAlgorithm(file_name, file_name + ".enc", CHUNK_SIZE),
         key_(derive_key(metadata_)) {
     // Write metadata to file, once and for all
@@ -258,6 +252,7 @@ class Encrypter final : public AbstractCryptoAlgorithm {
 class Decrypter final : public AbstractCryptoAlgorithm {
  public:
   Decrypter(const std::string &file_name)
+      // TODO: Opening file twice in Encrypter/Dec
       : AbstractCryptoAlgorithm(file_name, file_name + ".dec",
                                 ENCRYPTED_CHUNK_SIZE),
         metadata_(file_name),

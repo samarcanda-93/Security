@@ -20,7 +20,7 @@ enum class TaskType : u_int8_t {
 struct Task {
  public:
   Task(const std::string& command_name, const std::string& file_name)
-      : file_name(std::move(file_name)) {
+      : file_name(file_name) {
     if (command_name == "encrypt") {
       command_type = TaskType::Encrypt;
     } else if (command_name == "decrypt") {

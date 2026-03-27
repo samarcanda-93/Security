@@ -18,6 +18,7 @@ class TerminalSettings {
  public:
   TerminalSettings() {
     // Store current terminal settings
+    // TODO: Terminal settings return check
     tcgetattr(STDIN_FILENO, &cur_settings_);
   }
   TerminalSettings(const TerminalSettings&) = delete;
@@ -32,6 +33,7 @@ class TerminalSettings {
   auto turn_off_echo() noexcept -> void {
     termios new_settings{cur_settings_};
     new_settings.c_lflag &= ~ECHO;
+    // TODO: Terminal settings return check
     tcsetattr(STDIN_FILENO, TCSANOW, &new_settings);
   }
 
@@ -77,6 +79,7 @@ Password::Password() {
   terminal_settings.turn_off_echo();
 
   while (attempts_ < 3) {
+    // TODO: std::array<char, 256> password{}; for password
     if (!(std::cin >> password_)) {
       throw std::runtime_error("Cannot read password");
     }
