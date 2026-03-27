@@ -47,7 +47,8 @@ To achieve this, the pipeline is the following:
 - `crypto_secretbox` needs a different nonce for every encryption operation, and
   each file chunk is a separate encryption operation. This avoids reusing the
   same nonce for multiple messages. Therefore each encrypted chunk is composed
-  of nonce data and actual ciphertext.
+  of nonce data and actual ciphertext. While there are probably better tools for
+  the job, I didn't want to dig too much in libsodium.
 - I decided to enforce a strict password policy to simplify validation. Only
   lowercase alphabetic passwords are accepted, with a minimum length of 18
   specified by MIN_LENGTH. I believe that these passwords are very secure, hard
