@@ -6,6 +6,7 @@
 #include <array>
 #include <cstdint>
 #include <ios>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -43,7 +44,10 @@ class EncryptedFileMetadata {
       std::int32_t file_alg = crypto_pwhash_ALG_DEFAULT,
       std::uint64_t file_opslimit = crypto_pwhash_OPSLIMIT_INTERACTIVE,
       std::uint64_t file_memlimit = crypto_pwhash_MEMLIMIT_INTERACTIVE);
-  explicit EncryptedFileMetadata(const std::string& file_name);
+  EncryptedFileMetadata(
+      std::int32_t file_alg, std::uint64_t file_opslimit,
+      std::uint64_t file_memlimit,
+      std::array<unsigned char, crypto_pwhash_SALTBYTES> file_salt);
 
   [[nodiscard]] auto alg() const noexcept -> std::int32_t { return alg_; }
   [[nodiscard]] auto opslimit() const noexcept -> std::uint64_t {
@@ -62,8 +66,6 @@ class EncryptedFileMetadata {
                                        sizeof(opslimit_) + sizeof(memlimit_) +
                                        salt_.size());
   }
-
-  auto write_to_file(const std::string& file_name) const -> void;
 
  private:
   auto validate_() const -> void;

@@ -18,23 +18,25 @@ class TerminalSettings {
  public:
   TerminalSettings() {
     // Store current terminal settings
-    // TODO: Terminal settings return check
-    tcgetattr(STDIN_FILENO, &cur_settings_);
+    if (tcgetattr(STDIN_FILENO, &cur_settings_)) {
+      throw std::runtime_error("Cannot get terminal settings");
+    };
   }
   TerminalSettings(const TerminalSettings&) = delete;
   TerminalSettings(TerminalSettings&&) = delete;
   auto operator=(const TerminalSettings&) -> TerminalSettings& = delete;
   auto operator=(TerminalSettings&&) -> TerminalSettings& = delete;
-  ~TerminalSettings() noexcept {
+  ~TerminalSettings() {
     // Use RAII to auto reset terminal settings if everything explodes
     tcsetattr(STDIN_FILENO, TCSANOW, &cur_settings_);
   };
 
-  auto turn_off_echo() noexcept -> void {
+  auto turn_off_echo() -> void {
     termios new_settings{cur_settings_};
     new_settings.c_lflag &= ~ECHO;
-    // TODO: Terminal settings return check
-    tcsetattr(STDIN_FILENO, TCSANOW, &new_settings);
+    if (tcsetattr(STDIN_FILENO, TCSANOW, &new_settings)) {
+      throw std::runtime_error("Cannot change terminal settings");
+    }
   }
 
  private:

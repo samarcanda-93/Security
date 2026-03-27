@@ -31,78 +31,15 @@ EncryptedFileMetadata::EncryptedFileMetadata(std::int32_t file_alg,
   validate_();
 }
 
-EncryptedFileMetadata::EncryptedFileMetadata(const std::string &file_name) {
-  std::ifstream file_istream(file_name, std::ios::binary);
-  if (!file_istream.is_open()) {
-    throw std::runtime_error("Cannot open file for reading: " + file_name);
-  }
-
-  std::array<char, 4> magic{};
-  if (!file_istream.read(magic.data(),
-                         static_cast<std::streamsize>(magic.size()))) {
-    throw std::runtime_error("Cannot read file magic");
-  }
-  if (magic != std::array{'S', 'E', 'C', '\n'}) {
-    throw std::runtime_error("Invalid file format");
-  }
-  std::array<char, 4> version{};
-  if (!file_istream.read(version.data(),
-                         static_cast<std::streamsize>(version.size()))) {
-    throw std::runtime_error("Cannot read file version");
-  }
-  if (version != std::array<char, 4>{'1', '.', '0', '\n'}) {
-    throw std::runtime_error("Invalid file version");
-  }
-  if (!file_istream.read(reinterpret_cast<char *>(&alg_), sizeof(alg_))) {
-    throw std::runtime_error("Cannot read algorithm");
-  }
-  if (!file_istream.read(reinterpret_cast<char *>(&opslimit_),
-                         sizeof(opslimit_))) {
-    throw std::runtime_error("Cannot read opslimit");
-  }
-  if (!file_istream.read(reinterpret_cast<char *>(&memlimit_),
-                         sizeof(memlimit_))) {
-    throw std::runtime_error("Cannot read memlimit");
-  }
-  if (!file_istream.read(reinterpret_cast<char *>(salt_.data()),
-                         static_cast<std::streamsize>(salt_.size()))) {
-    throw std::runtime_error("Cannot read salt");
-  }
-
+EncryptedFileMetadata::EncryptedFileMetadata(
+    std::int32_t file_alg, std::uint64_t file_opslimit,
+    std::uint64_t file_memlimit,
+    std::array<unsigned char, crypto_pwhash_SALTBYTES> file_salt)
+    : alg_(file_alg),
+      opslimit_(file_opslimit),
+      memlimit_(file_memlimit),
+      salt_(file_salt) {
   validate_();
-}
-
-auto EncryptedFileMetadata::write_to_file(const std::string &file_name) const
-    -> void {
-  std::ofstream file_ofstream(file_name, std::ios::binary);
-  if (!file_ofstream.is_open()) {
-    throw std::runtime_error("Cannot open file for writing: " + file_name);
-  }
-  if (!file_ofstream.write("SEC\n", 4)) {
-    throw std::runtime_error("Cannot write file magic");
-  }
-  if (!file_ofstream.write("1.0\n", 4)) {
-    throw std::runtime_error("Cannot write file version");
-  }
-  if (!file_ofstream.write(reinterpret_cast<const char *>(&alg_),
-                           sizeof(alg_))) {
-    throw std::runtime_error("Cannot write algorithm id");
-  }
-  if (!file_ofstream.write(reinterpret_cast<const char *>(&opslimit_),
-                           sizeof(opslimit_))) {
-    throw std::runtime_error("Cannot write opslimit");
-  }
-  if (!file_ofstream.write(reinterpret_cast<const char *>(&memlimit_),
-                           sizeof(memlimit_))) {
-    throw std::runtime_error("Cannot write memlimit");
-  }
-
-  for (const auto &salt_ch : salt_) {
-    if (!file_ofstream.write(reinterpret_cast<const char *>(&salt_ch),
-                             sizeof(salt_ch))) {
-      throw std::runtime_error("Cannot write salt");
-    }
-  }
 }
 
 auto EncryptedFileMetadata::validate_() const -> void {
@@ -158,8 +95,7 @@ class AbstractCryptoAlgorithm {
                           const std::string &output_file_name,
                           std::size_t chunk_size)
       : file_istream_(input_file_name, std::ios::binary),
-        // TODO: Check append behaviour
-        file_ofstream_(output_file_name, std::ios::binary | std::ios::app),
+        file_ofstream_(output_file_name, std::ios::binary),
         output_file_name_(output_file_name),
         chunk_size_(chunk_size) {
     if (!file_istream_.is_open()) {
@@ -192,14 +128,42 @@ class AbstractCryptoAlgorithm {
 class Encrypter final : public AbstractCryptoAlgorithm {
  public:
   Encrypter(const std::string &file_name)
-      // TODO: Opening file twice in Encrypter/Dec
       : AbstractCryptoAlgorithm(file_name, file_name + ".enc", CHUNK_SIZE),
         key_(derive_key(metadata_)) {
-    // Write metadata to file, once and for all
-    metadata_.write_to_file(output_file_name_);
+    write_metadata_();
   }
 
  private:
+  auto write_metadata_() -> void {
+    const auto alg = metadata_.alg();
+    const auto opslimit = metadata_.opslimit();
+    const auto memlimit = metadata_.memlimit();
+
+    if (!file_ofstream_.write("SEC\n", 4)) {
+      throw std::runtime_error("Cannot write file magic");
+    }
+    if (!file_ofstream_.write("1.0\n", 4)) {
+      throw std::runtime_error("Cannot write file version");
+    }
+    if (!file_ofstream_.write(reinterpret_cast<const char *>(&alg),
+                              sizeof(alg))) {
+      throw std::runtime_error("Cannot write algorithm id");
+    }
+    if (!file_ofstream_.write(reinterpret_cast<const char *>(&opslimit),
+                              sizeof(opslimit))) {
+      throw std::runtime_error("Cannot write opslimit");
+    }
+    if (!file_ofstream_.write(reinterpret_cast<const char *>(&memlimit),
+                              sizeof(memlimit))) {
+      throw std::runtime_error("Cannot write memlimit");
+    }
+    if (!file_ofstream_.write(
+            reinterpret_cast<const char *>(metadata_.salt().data()),
+            static_cast<std::streamsize>(metadata_.salt().size()))) {
+      throw std::runtime_error("Cannot write salt");
+    }
+  }
+
   auto read_chunk_() -> void override {
     bytes_read_ = 0;
     for (std::size_t i = 0; i < CHUNK_SIZE; ++i) {
@@ -252,10 +216,9 @@ class Encrypter final : public AbstractCryptoAlgorithm {
 class Decrypter final : public AbstractCryptoAlgorithm {
  public:
   Decrypter(const std::string &file_name)
-      // TODO: Opening file twice in Encrypter/Dec
       : AbstractCryptoAlgorithm(file_name, file_name + ".dec",
                                 ENCRYPTED_CHUNK_SIZE),
-        metadata_(file_name),
+        metadata_(load_metadata_(file_name)),
         key_(derive_key(metadata_)) {
     // Go to read the ecrypted text
     file_istream_.seekg(metadata_.size());
@@ -265,6 +228,55 @@ class Decrypter final : public AbstractCryptoAlgorithm {
   }
 
  private:
+  static auto load_metadata_(const std::string &file_name)
+      -> detail::EncryptedFileMetadata {
+    std::ifstream file_istream(file_name, std::ios::binary);
+    if (!file_istream.is_open()) {
+      throw std::runtime_error("Cannot open file for reading: " + file_name);
+    }
+
+    std::array<char, 4> magic{};
+    if (!file_istream.read(magic.data(),
+                           static_cast<std::streamsize>(magic.size()))) {
+      throw std::runtime_error("Cannot read file magic");
+    }
+    if (magic != std::array{'S', 'E', 'C', '\n'}) {
+      throw std::runtime_error("Invalid file format");
+    }
+
+    std::array<char, 4> version{};
+    if (!file_istream.read(version.data(),
+                           static_cast<std::streamsize>(version.size()))) {
+      throw std::runtime_error("Cannot read file version");
+    }
+    if (version != std::array<char, 4>{'1', '.', '0', '\n'}) {
+      throw std::runtime_error("Invalid file version");
+    }
+
+    std::int32_t alg = 0;
+    std::uint64_t opslimit = 0;
+    std::uint64_t memlimit = 0;
+    std::array<unsigned char, crypto_pwhash_SALTBYTES> salt{};
+
+    if (!file_istream.read(reinterpret_cast<char *>(&alg), sizeof(alg))) {
+      throw std::runtime_error("Cannot read algorithm");
+    }
+    if (!file_istream.read(reinterpret_cast<char *>(&opslimit),
+                           sizeof(opslimit))) {
+      throw std::runtime_error("Cannot read opslimit");
+    }
+    if (!file_istream.read(reinterpret_cast<char *>(&memlimit),
+                           sizeof(memlimit))) {
+      throw std::runtime_error("Cannot read memlimit");
+    }
+    if (!file_istream.read(reinterpret_cast<char *>(salt.data()),
+                           static_cast<std::streamsize>(salt.size()))) {
+      throw std::runtime_error("Cannot read salt");
+    }
+
+    return {alg, opslimit, memlimit, salt};
+  }
+
   auto read_chunk_() -> void override {
     bytes_read_ = 0;
 
