@@ -14,8 +14,15 @@
 
 namespace {
 
+/**
+ * @brief Temporarily replaces stdin for tests.
+ */
 class ScopedStdinRedirect {
  public:
+  /**
+   * @brief Redirects stdin to a replacement file descriptor.
+   * @param replacement_fd File descriptor to expose as stdin.
+   */
   explicit ScopedStdinRedirect(int replacement_fd)
       : saved_fd_(dup(STDIN_FILENO)) {
     if (saved_fd_ == -1) {
@@ -30,6 +37,7 @@ class ScopedStdinRedirect {
   ScopedStdinRedirect(const ScopedStdinRedirect&) = delete;
   auto operator=(const ScopedStdinRedirect&) -> ScopedStdinRedirect& = delete;
 
+  /** @brief Restores the original stdin file descriptor. */
   ~ScopedStdinRedirect() {
     if (saved_fd_ != -1) {
       dup2(saved_fd_, STDIN_FILENO);
@@ -41,6 +49,11 @@ class ScopedStdinRedirect {
   int saved_fd_;
 };
 
+/**
+ * @brief Runs a task while feeding a password through a pseudo terminal.
+ * @param task Task to execute.
+ * @param password Password written to stdin.
+ */
 auto run_task_with_password(const Task& task, const std::string& password)
     -> void {
   int master_fd = -1;
@@ -71,6 +84,11 @@ auto run_task_with_password(const Task& task, const std::string& password)
   close(master_fd);
 }
 
+/**
+ * @brief Reads a whole file into memory for tests.
+ * @param path File to read.
+ * @return Complete file contents.
+ */
 auto read_file(const std::filesystem::path& path) -> std::string {
   std::ifstream input(path, std::ios::binary);
   return {std::istreambuf_iterator<char>(input),

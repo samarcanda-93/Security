@@ -16,6 +16,11 @@ constexpr std::size_t CHUNK_SIZE = 4096;
 constexpr std::size_t ENCRYPTED_CHUNK_SIZE(CHUNK_SIZE +
                                            crypto_secretbox_MACBYTES);
 
+/**
+ * @brief Prompts for a password and derives the file key.
+ * @param metadata Metadata containing derivation parameters.
+ * @return Derived symmetric key.
+ */
 auto derive_key(const detail::EncryptedFileMetadata &metadata) -> detail::Key {
   return {detail::Password(), metadata};
 }
@@ -23,6 +28,8 @@ auto derive_key(const detail::EncryptedFileMetadata &metadata) -> detail::Key {
 }  // namespace
 
 namespace detail {
+/** @brief Builds metadata for a new encrypted file and generates a fresh salt.
+ */
 EncryptedFileMetadata::EncryptedFileMetadata(std::int32_t file_alg,
                                              std::uint64_t file_opslimit,
                                              std::uint64_t file_memlimit)
@@ -31,6 +38,7 @@ EncryptedFileMetadata::EncryptedFileMetadata(std::int32_t file_alg,
   validate_();
 }
 
+/** @brief Builds metadata from values read from an encrypted file header. */
 EncryptedFileMetadata::EncryptedFileMetadata(
     std::int32_t file_alg, std::uint64_t file_opslimit,
     std::uint64_t file_memlimit,
@@ -42,6 +50,8 @@ EncryptedFileMetadata::EncryptedFileMetadata(
   validate_();
 }
 
+/** @brief Ensures metadata contains only supported password hashing settings.
+ */
 auto EncryptedFileMetadata::validate_() const -> void {
   static const std::array<std::int32_t, 3> ValidAlgorithms{
       crypto_pwhash_ALG_ARGON2I13, crypto_pwhash_ALG_ARGON2ID13,
@@ -66,8 +76,12 @@ auto EncryptedFileMetadata::validate_() const -> void {
 
 }  // namespace detail
 
+/**
+ * @brief Template for encryption and decryption algorithms.
+ */
 class AbstractCryptoAlgorithm {
  public:
+  /** @brief Runs the full chunk-processing loop. */
   auto execute() -> void {
     while (true) {
       read_chunk_();
@@ -88,9 +102,16 @@ class AbstractCryptoAlgorithm {
       -> AbstractCryptoAlgorithm & = delete;
   auto operator=(AbstractCryptoAlgorithm &&)
       -> AbstractCryptoAlgorithm & = delete;
+  /** @brief Virtual destructor for polymorphic cleanup. */
   virtual ~AbstractCryptoAlgorithm() = default;
 
  protected:
+  /**
+   * @brief Opens the input and output files for a crypto operation.
+   * @param input_file_name Source file path.
+   * @param output_file_name Destination file path.
+   * @param chunk_size Number of bytes processed per iteration.
+   */
   AbstractCryptoAlgorithm(const std::string &input_file_name,
                           const std::string &output_file_name,
                           std::size_t chunk_size)
@@ -110,9 +131,11 @@ class AbstractCryptoAlgorithm {
   virtual auto read_chunk_() -> void = 0;
   virtual auto cook_chunk_() -> void = 0;
   virtual auto write_chunk_() -> void = 0;
+  /** @brief Returns whether the current chunk is empty. */
   [[nodiscard]] auto chunk_is_empty_() const -> bool {
     return bytes_read_ == 0;
   }
+  /** @brief Returns whether the current chunk is the last one in the stream. */
   [[nodiscard]] auto is_last_chunk_() const -> bool {
     return bytes_read_ < chunk_size_;
   }
@@ -125,8 +148,15 @@ class AbstractCryptoAlgorithm {
   std::array<unsigned char, crypto_secretbox_NONCEBYTES> chunk_nonce_{};
 };
 
+/**
+ * @brief Encrypts a cleartext file.
+ */
 class Encrypter final : public AbstractCryptoAlgorithm {
  public:
+  /**
+   * @brief Creates an encrypter for a source file.
+   * @param file_name Cleartext file to encrypt.
+   */
   Encrypter(const std::string &file_name)
       : AbstractCryptoAlgorithm(file_name, file_name + ".enc", CHUNK_SIZE),
         key_(derive_key(metadata_)) {
@@ -134,6 +164,7 @@ class Encrypter final : public AbstractCryptoAlgorithm {
   }
 
  private:
+  /** @brief Writes the encrypted file header before ciphertext chunks. */
   auto write_metadata_() -> void {
     const auto alg = metadata_.alg();
     const auto opslimit = metadata_.opslimit();
@@ -164,6 +195,7 @@ class Encrypter final : public AbstractCryptoAlgorithm {
     }
   }
 
+  /** @brief Reads the next chunk from the source file. */
   auto read_chunk_() -> void override {
     bytes_read_ = 0;
     for (std::size_t i = 0; i < CHUNK_SIZE; ++i) {
@@ -177,6 +209,7 @@ class Encrypter final : public AbstractCryptoAlgorithm {
     }
   }
 
+  /** @brief Encrypts the current chunk. */
   auto cook_chunk_() -> void override {
     if (bytes_read_ == 0) {
       encrypted_text_chunk_.clear();
@@ -193,6 +226,7 @@ class Encrypter final : public AbstractCryptoAlgorithm {
     }
   }
 
+  /** @brief Writes the nonce and ciphertext for the current chunk. */
   auto write_chunk_() -> void override {
     if (!file_ofstream_.write(
             reinterpret_cast<const char *>(chunk_nonce_.data()),
@@ -213,8 +247,15 @@ class Encrypter final : public AbstractCryptoAlgorithm {
   std::vector<unsigned char> encrypted_text_chunk_;
 };
 
+/**
+ * @brief Decrypts an encrypted file back to plaintext.
+ */
 class Decrypter final : public AbstractCryptoAlgorithm {
  public:
+  /**
+   * @brief Creates a decrypter for an encrypted file.
+   * @param file_name Encrypted file to decrypt.
+   */
   Decrypter(const std::string &file_name)
       : AbstractCryptoAlgorithm(file_name, file_name + ".dec",
                                 ENCRYPTED_CHUNK_SIZE),
@@ -228,6 +269,11 @@ class Decrypter final : public AbstractCryptoAlgorithm {
   }
 
  private:
+  /**
+   * @brief Reads and validates metadata from an encrypted file header.
+   * @param file_name Encrypted file to inspect.
+   * @return EncryptedFileMetadata object.
+   */
   static auto load_metadata_(const std::string &file_name)
       -> detail::EncryptedFileMetadata {
     std::ifstream file_istream(file_name, std::ios::binary);
@@ -277,6 +323,7 @@ class Decrypter final : public AbstractCryptoAlgorithm {
     return {alg, opslimit, memlimit, salt};
   }
 
+  /** @brief Reads the next nonce and ciphertext chunk from the source file. */
   auto read_chunk_() -> void override {
     bytes_read_ = 0;
 
@@ -306,6 +353,7 @@ class Decrypter final : public AbstractCryptoAlgorithm {
     }
   }
 
+  /** @brief Decrypts the currently loaded ciphertext chunk. */
   auto cook_chunk_() -> void override {
     if (bytes_read_ == 0) {
       file_text_chunk_.clear();
@@ -325,6 +373,7 @@ class Decrypter final : public AbstractCryptoAlgorithm {
     }
   }
 
+  /** @brief Writes the decrypted plaintext chunk to the output file. */
   auto write_chunk_() -> void override {
     if (!file_ofstream_.write(
             reinterpret_cast<const char *>(file_text_chunk_.data()),
@@ -339,6 +388,7 @@ class Decrypter final : public AbstractCryptoAlgorithm {
   std::vector<unsigned char> file_text_chunk_;
 };
 
+/** @brief Dispatches a task to the corresponding algorithm. */
 auto run_task(const Task &task) -> void {
   switch (task.command_type) {
     case TaskType::Encrypt: {
