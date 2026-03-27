@@ -69,20 +69,20 @@ Tests cover:
 - metadata validation
 - an e2e encrypt/decrypt round trip
 
-Run tests with
-
-````bash
-cmake -S . -B build
-cmake --build build
-ctest --test-dir build --output-on-failure
-```
-
 ## Requirements
 
 - C++23 compiler and standard library.
 - CMake 3.28 or newer
 - GoogleTest
 - libsodium
+
+Run tests with
+
+```bash
+cmake -S . -B build
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
 
 ## Build and Run
 
@@ -91,4 +91,4 @@ cmake -S . -B build
 cmake --build build
 ./build/Security encrypt path/to/file
 ./build/Security decrypt path/to/file.enc
-````
+```
