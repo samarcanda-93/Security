@@ -90,5 +90,5 @@ ctest --test-dir build --output-on-failure
 cmake -S . -B build
 cmake --build build
 ./build/Security encrypt path/to/file
-./build/Security decrypt path/to/file.enc
+./build/Security decrypt path/to/file
 ```
