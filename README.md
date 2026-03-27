@@ -57,6 +57,7 @@ To achieve this, the pipeline is the following:
   more secure?:
   1. yesterdaymorningitookahike
   2. P&pp4p1Gg!
+
      I believe 1 and 1.
 
 ## Testing
