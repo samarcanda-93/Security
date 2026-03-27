@@ -81,7 +81,6 @@ Password::Password() {
   terminal_settings.turn_off_echo();
 
   while (attempts_ < 3) {
-    // TODO: std::array<char, 256> password{}; for password
     if (!(std::cin >> password_)) {
       throw std::runtime_error("Cannot read password");
     }
