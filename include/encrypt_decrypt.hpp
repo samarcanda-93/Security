@@ -4,7 +4,6 @@
 #include <sodium/crypto_secretbox.h>
 
 #include <array>
-#include <cstddef>
 #include <cstdint>
 #include <ios>
 #include <stdexcept>
@@ -57,14 +56,11 @@ class EncryptedFileMetadata {
       -> const std::array<unsigned char, crypto_pwhash_SALTBYTES>& {
     return salt_;
   }
-  [[nodiscard]] auto nonce() const noexcept
-      -> const std::array<unsigned char, crypto_secretbox_NONCEBYTES>& {
-    return nonce_;
-  }
+
   [[nodiscard]] auto size() const noexcept -> std::streamoff {
     return static_cast<std::streamoff>(4 + 4 + sizeof(alg_) +
                                        sizeof(opslimit_) + sizeof(memlimit_) +
-                                       salt_.size() + nonce_.size());
+                                       salt_.size());
   }
 
   auto write_to_file(const std::string& file_name) const -> void;
@@ -76,6 +72,5 @@ class EncryptedFileMetadata {
   std::uint64_t opslimit_{};
   std::uint64_t memlimit_{};
   std::array<unsigned char, crypto_pwhash_SALTBYTES> salt_{};
-  std::array<unsigned char, crypto_secretbox_NONCEBYTES> nonce_{};
 };
 }  // namespace detail

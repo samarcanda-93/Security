@@ -36,7 +36,6 @@ EncryptedFileMetadata::EncryptedFileMetadata(std::int32_t file_alg,
                                              std::uint64_t file_memlimit)
     : alg_(file_alg), opslimit_(file_opslimit), memlimit_(file_memlimit) {
   randombytes_buf(salt_.data(), salt_.size());
-  randombytes_buf(nonce_.data(), nonce_.size());
   validate_();
 }
 
@@ -77,10 +76,7 @@ EncryptedFileMetadata::EncryptedFileMetadata(const std::string &file_name) {
                          static_cast<std::streamsize>(salt_.size()))) {
     throw std::runtime_error("Cannot read salt");
   }
-  if (!file_istream.read(reinterpret_cast<char *>(nonce_.data()),
-                         static_cast<std::streamsize>(nonce_.size()))) {
-    throw std::runtime_error("Cannot read nonce");
-  }
+
   validate_();
 }
 
@@ -113,12 +109,6 @@ auto EncryptedFileMetadata::write_to_file(const std::string &file_name) const
     if (!file_ofstream.write(reinterpret_cast<const char *>(&salt_ch),
                              sizeof(salt_ch))) {
       throw std::runtime_error("Cannot write salt");
-    }
-  }
-  for (const auto &nonce_ch : nonce_) {
-    if (!file_ofstream.write(reinterpret_cast<const char *>(&nonce_ch),
-                             sizeof(nonce_ch))) {
-      throw std::runtime_error("Cannot write nonce");
     }
   }
 }
@@ -191,7 +181,9 @@ class AbstractCryptoAlgorithm {
   virtual auto read_chunk_() -> void = 0;
   virtual auto cook_chunk_() -> void = 0;
   virtual auto write_chunk_() -> void = 0;
-  [[nodiscard]] auto chunk_is_empty_() const -> bool { return bytes_read_ == 0; }
+  [[nodiscard]] auto chunk_is_empty_() const -> bool {
+    return bytes_read_ == 0;
+  }
   [[nodiscard]] auto is_last_chunk_() const -> bool {
     return bytes_read_ < chunk_size_;
   }
@@ -201,6 +193,7 @@ class AbstractCryptoAlgorithm {
   std::string output_file_name_;
   std::size_t bytes_read_{0};
   std::size_t chunk_size_{0};
+  std::array<unsigned char, crypto_secretbox_NONCEBYTES> chunk_nonce_{};
 };
 
 class Encrypter final : public AbstractCryptoAlgorithm {
@@ -232,15 +225,23 @@ class Encrypter final : public AbstractCryptoAlgorithm {
       return;
     }
 
+    randombytes_buf(chunk_nonce_.data(), chunk_nonce_.size());
+
     encrypted_text_chunk_.resize(bytes_read_ + crypto_secretbox_MACBYTES);
     if (crypto_secretbox_easy(encrypted_text_chunk_.data(),
                               file_text_chunk_.data(), bytes_read_,
-                              metadata_.nonce().data(), key_.key_data()) != 0) {
+                              chunk_nonce_.data(), key_.key_data()) != 0) {
       throw std::runtime_error("Encryption failed");
     }
   }
 
   auto write_chunk_() -> void override {
+    if (!file_ofstream_.write(
+            reinterpret_cast<const char *>(chunk_nonce_.data()),
+            static_cast<std::streamsize>(chunk_nonce_.size()))) {
+      throw std::runtime_error("Cannot write chunk nonce");
+    }
+
     if (!file_ofstream_.write(
             reinterpret_cast<const char *>(encrypted_text_chunk_.data()),
             static_cast<std::streamsize>(encrypted_text_chunk_.size()))) {
@@ -272,6 +273,17 @@ class Decrypter final : public AbstractCryptoAlgorithm {
   auto read_chunk_() -> void override {
     bytes_read_ = 0;
 
+    file_istream_.read(reinterpret_cast<char *>(chunk_nonce_.data()),
+                       static_cast<std::streamsize>(chunk_nonce_.size()));
+    const auto nonce_bytes_read = file_istream_.gcount();
+
+    if (nonce_bytes_read == 0) {
+      return;
+    }
+    if (nonce_bytes_read != static_cast<std::streamsize>(chunk_nonce_.size())) {
+      throw std::runtime_error("Truncated chunk nonce");
+    }
+
     for (std::size_t i = 0; i < ENCRYPTED_CHUNK_SIZE; ++i) {
       unsigned char buffer = 0;
       if (file_istream_.read(reinterpret_cast<char *>(&buffer), 1)) {
@@ -280,6 +292,10 @@ class Decrypter final : public AbstractCryptoAlgorithm {
       } else {
         break;
       }
+    }
+
+    if (bytes_read_ == 0) {
+      throw std::runtime_error("Missing ciphertext after chunk nonce");
     }
   }
 
@@ -295,9 +311,9 @@ class Decrypter final : public AbstractCryptoAlgorithm {
     }
     file_text_chunk_.resize(bytes_read_ - crypto_secretbox_MACBYTES);
 
-    if (crypto_secretbox_open_easy(
-            file_text_chunk_.data(), encrypted_text_chunk_.data(), bytes_read_,
-            metadata_.nonce().data(), key_.key_data()) != 0) {
+    if (crypto_secretbox_open_easy(file_text_chunk_.data(),
+                                   encrypted_text_chunk_.data(), bytes_read_,
+                                   chunk_nonce_.data(), key_.key_data()) != 0) {
       throw std::runtime_error("Decryption failed");
     }
   }
