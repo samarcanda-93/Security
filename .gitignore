@@ -1,3 +1,11 @@
 build/
 .cache/
 .vscode/
+
+# In-source CMake/CTest artifacts
+Testing/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+CTestTestfile.cmake
+compile_commands.json
