@@ -52,6 +52,7 @@ To achieve this, the pipeline is the following:
 - I decided to enforce a strict password policy to simplify validation. Only
   lowercase alphabetic passwords are accepted, with a minimum length of 18
   specified by MIN_LENGTH.
+- The codebase is designed to keep passwords, derived keys, and in general crypto-related operations tightly scoped and short-lived inside the Encrypter and Decrypter objects. This improves cleanup and risk of leaking sensitive information, but it also makes the inner algorithm harder to unit test.
 
 ## Testing
 
