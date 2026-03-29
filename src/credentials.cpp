@@ -31,7 +31,7 @@ class TerminalSettings {
   auto operator=(const TerminalSettings&) -> TerminalSettings& = delete;
   auto operator=(TerminalSettings&&) -> TerminalSettings& = delete;
   /** @brief Uses RAII to restore the original terminal configuration. */
-  ~TerminalSettings() { tcsetattr(STDIN_FILENO, TCSANOW, &cur_settings_); };
+  ~TerminalSettings() { tcsetattr(STDIN_FILENO, TCSANOW, &cur_settings_); }
 
   /** @brief Disables terminal echo while the password is entered. */
   auto turn_off_echo() -> void {

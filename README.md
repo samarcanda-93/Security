@@ -51,14 +51,7 @@ To achieve this, the pipeline is the following:
   the job, I didn't want to dig too much in libsodium.
 - I decided to enforce a strict password policy to simplify validation. Only
   lowercase alphabetic passwords are accepted, with a minimum length of 18
-  specified by MIN_LENGTH. I believe that these passwords are very secure, hard
-  to break, and easier to remember than a shorter password with numbers, special
-  characters, and so on. EXAMPLE: which password is easier to memorize, which is
-  more secure?:
-  1. yesterdaymorningitookahike
-  2. P&pp4p1Gg!
-
-I believe 1 and 1.
+  specified by MIN_LENGTH.
 
 ## Testing
 
@@ -79,7 +72,7 @@ Tests cover:
 Run tests with
 
 ```bash
-cmake -S . -B build
+cmake -S . -B build -DBUILD_TESTS=ON
 cmake --build build
 ctest --test-dir build --output-on-failure
 ```

@@ -13,8 +13,8 @@
 
 namespace {
 constexpr std::size_t CHUNK_SIZE = 4096;
-constexpr std::size_t ENCRYPTED_CHUNK_SIZE(CHUNK_SIZE +
-                                           crypto_secretbox_MACBYTES);
+constexpr std::size_t ENCRYPTED_CHUNK_SIZE =
+    CHUNK_SIZE + crypto_secretbox_MACBYTES;
 
 /**
  * @brief Prompts for a password and derives the file key.
@@ -197,16 +197,9 @@ class Encrypter final : public AbstractCryptoAlgorithm {
 
   /** @brief Reads the next chunk from the source file. */
   auto read_chunk_() -> void override {
-    bytes_read_ = 0;
-    for (std::size_t i = 0; i < CHUNK_SIZE; ++i) {
-      unsigned char buffer = 0;
-      if (file_istream_.read(reinterpret_cast<char *>(&buffer), 1)) {
-        file_text_chunk_.at(i) = buffer;
-        ++bytes_read_;
-      } else {
-        break;
-      }
-    }
+    file_istream_.read(reinterpret_cast<char *>(file_text_chunk_.data()),
+                       static_cast<std::streamsize>(file_text_chunk_.size()));
+    bytes_read_ = static_cast<std::size_t>(file_istream_.gcount());
   }
 
   /** @brief Encrypts the current chunk. */
@@ -261,7 +254,7 @@ class Decrypter final : public AbstractCryptoAlgorithm {
                                 ENCRYPTED_CHUNK_SIZE),
         metadata_(load_metadata_(file_name)),
         key_(derive_key(metadata_)) {
-    // Go to read the ecrypted text
+    // Go to read the encrypted text
     file_istream_.seekg(metadata_.size());
     if (!file_istream_) {
       throw std::runtime_error("Cannot get to encrypted text");
@@ -338,15 +331,10 @@ class Decrypter final : public AbstractCryptoAlgorithm {
       throw std::runtime_error("Truncated chunk nonce");
     }
 
-    for (std::size_t i = 0; i < ENCRYPTED_CHUNK_SIZE; ++i) {
-      unsigned char buffer = 0;
-      if (file_istream_.read(reinterpret_cast<char *>(&buffer), 1)) {
-        encrypted_text_chunk_.at(i) = buffer;
-        ++bytes_read_;
-      } else {
-        break;
-      }
-    }
+    file_istream_.read(
+        reinterpret_cast<char *>(encrypted_text_chunk_.data()),
+        static_cast<std::streamsize>(encrypted_text_chunk_.size()));
+    bytes_read_ = static_cast<std::size_t>(file_istream_.gcount());
 
     if (bytes_read_ == 0) {
       throw std::runtime_error("Missing ciphertext after chunk nonce");

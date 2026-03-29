@@ -6,17 +6,15 @@
 #include <array>
 #include <cstdint>
 #include <ios>
-#include <optional>
 #include <stdexcept>
 #include <string>
-#include <utility>
 
 #include "credentials.hpp"
 
 /**
  * @brief Describes the supported high-level command types.
  */
-enum class TaskType : u_int8_t {
+enum class TaskType : std::uint8_t {
   Encrypt,
   Decrypt,
 };

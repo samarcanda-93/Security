@@ -10,9 +10,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 find_library(SODIUM_LIB sodium REQUIRED)
 
-file(GLOB SOURCES CONFIGURE_DEPENDS "src/*.cpp")
-
-add_executable(${PROJECT_NAME} ${SOURCES})
+add_executable(${PROJECT_NAME} src/main.cpp src/credentials.cpp
+                               src/encrypt_decrypt.cpp)
 target_include_directories(${PROJECT_NAME} PRIVATE include/)
 target_link_libraries(${PROJECT_NAME} PRIVATE ${SODIUM_LIB})
 
