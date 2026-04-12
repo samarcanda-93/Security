@@ -1,4 +1,4 @@
-# Security
+# File Encryptor
 
 **Author:** G. Accorto
 
